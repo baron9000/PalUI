@@ -3,17 +3,26 @@ services:
     build: .
     container_name: palui
     restart: unless-stopped
-    ports:
-      - "8005:8005"
     environment:
       PGID: 10
       PUID: 1000
-      PALWORLD_API_BASE_URL: "http://palworld-server:8212"
+      PALWORLD_API_BASE_URL: "http://192.168.10.3:8212"
       PALWORLD_API_TOKEN: ""
       PALWORLD_API_TOKEN_HEADER: "Authorization"
       PALWORLD_API_TOKEN_PREFIX: "Bearer"
       PALWORLD_CONFIG_DIR: "/palworld/Pal/Saved/Config/LinuxServer"
     volumes:
       - /volume1/Games/palworld:/palworld:rw
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    networks:
+      physical_eth:
+        ipv4_address: 192.168.10.7
+
+networks:
+  physical_eth:
+    driver: macvlan
+    driver_opts:
+      parent: eth1
+    ipam:
+      config:
+        - subnet: "192.168.10.0/24"
+          gateway: "192.168.10.1"
