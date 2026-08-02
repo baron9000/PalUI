@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PalUI Control Panel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <h1>PalUI</h1>
+          <p>Palworld 1.0 server control panel</p>
+        </div>
+        <div class="hero-meta">
+          <div><strong>API:</strong> {{ api_base }}</div>
+          <div><strong>Config Path:</strong> {{ config_dir }}</div>
+        </div>
+      </header>
+
+      {% if request.args.get('message') %}
+        <section class="banner {{ 'ok' if request.args.get('status') == 'ok' else 'error' }}">
+          {{ request.args.get('message') }}
+        </section>
+      {% endif %}
+
+      <section class="grid two-up">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Server Statistics</h2>
+            <button id="refreshStats" type="button">Refresh</button>
+          </div>
+          <p class="status {{ 'ok' if stats_ok else 'error' }}">
+            {{ 'Connected to API.' if stats_ok else 'Could not retrieve statistics from API.' }}
+          </p>
+          <pre id="statsOutput">{{ stats_data | tojson(indent=2) }}</pre>
+        </article>
+
+        <article class="panel">
+          <h2>Moderation Tasks</h2>
+
+          <form class="inline-form" data-endpoint="/api/mod/announcement">
+            <label>Announcement</label>
+            <input name="message" type="text" placeholder="Message to all players" required />
+            <button type="submit">Send</button>
+          </form>
+
+          <form class="inline-form" data-endpoint="/api/mod/kick">
+            <label>Kick Player</label>
+            <input name="player_id" type="text" placeholder="Player ID / SteamID" required />
+            <input name="reason" type="text" placeholder="Reason" />
+            <button type="submit">Kick</button>
+          </form>
+
+          <form class="inline-form" data-endpoint="/api/mod/ban">
+            <label>Ban Player</label>
+            <input name="player_id" type="text" placeholder="Player ID / SteamID" required />
+            <input name="reason" type="text" placeholder="Reason" />
+            <button type="submit">Ban</button>
+          </form>
+
+          <form class="inline-form" data-endpoint="/api/mod/restart">
+            <label>Restart Server</label>
+            <input name="message" type="text" value="Server restarting." />
+            <button class="warn" type="submit">Restart</button>
+          </form>
+
+          <form class="inline-form" data-endpoint="/api/mod/shutdown">
+            <label>Shutdown Server</label>
+            <input name="message" type="text" value="Server shutting down." />
+            <button class="danger" type="submit">Shutdown</button>
+          </form>
+
+          <pre id="modOutput">No moderation actions run yet.</pre>
+        </article>
+      </section>
+
+      <section class="grid two-up">
+        <article class="panel">
+          <h2>Backup Management</h2>
+          <p class="status ok">Backup path: {{ backup_dir }}</p>
+
+          <form class="inline-form backup-actions" data-endpoint="/api/backups/create" data-output="backupOutput">
+            <label>Create Backup</label>
+            <div class="inline-fill">Create a timestamped archive of save and config data.</div>
+            <button type="submit">Create</button>
+          </form>
+
+          <form class="inline-form backup-actions" data-endpoint="/api/backups/restore" data-output="backupOutput" id="restoreForm">
+            <label>Restore Backup</label>
+            <select name="backup_name" id="backupSelect" required>
+              {% if backups|length == 0 %}
+                <option value="" selected disabled>No backups found</option>
+              {% else %}
+                {% for backup in backups %}
+                  <option value="{{ backup.name }}">{{ backup.name }} ({{ backup.size_bytes }} bytes)</option>
+                {% endfor %}
+              {% endif %}
+            </select>
+            <button class="warn" type="submit">Restore</button>
+          </form>
+
+          <div class="actions left">
+            <button id="refreshBackups" type="button">Refresh Backup List</button>
+          </div>
+
+          <pre id="backupOutput">No backup actions run yet.</pre>
+        </article>
+
+        <article class="panel">
+          <h2>Backups Available</h2>
+          <pre id="backupListOutput">{{ backups | tojson(indent=2) }}</pre>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Server Config Editor</h2>
+        <p>
+          Editing either config file saves changes to disk and triggers a Palworld announcement + restart.
+        </p>
+
+        <form method="post" action="/config/save" class="config-form">
+          {% for file_name, sections in configs.items() %}
+            <details class="file-block" open>
+              <summary>{{ file_name }}</summary>
+
+              {% if sections|length == 0 %}
+                <p class="muted">No sections found in this file yet.</p>
+              {% endif %}
+
+              {% for section in sections %}
+                <div class="section-block">
+                  <h3>{{ section.name }}</h3>
+                  <div class="field-grid">
+                    {% for field in section.fields %}
+                      <div class="field-row">
+                        <label>{{ field.key }}</label>
+
+                        {% if field.input_type == 'bool' %}
+                          <input type="hidden" name="__bool_fields" value="{{ field.field_name }}" />
+                          <input
+                            type="checkbox"
+                            name="{{ field.field_name }}"
+                            value="true"
+                            {% if field.value.lower() == 'true' %}checked{% endif %}
+                          />
+                        {% elif field.input_type == 'enum' %}
+                          <div class="enum-group">
+                            {% for option in field.enum_values %}
+                              <label class="enum-option">
+                                <input
+                                  type="radio"
+                                  name="{{ field.field_name }}"
+                                  value="{{ option }}"
+                                  {% if field.value == option %}checked{% endif %}
+                                />
+                                <span>{{ option }}</span>
+                              </label>
+                            {% endfor %}
+                          </div>
+                        {% elif field.input_type == 'slider' %}
+                          <div class="slider-group">
+                            <input
+                              type="range"
+                              name="{{ field.field_name }}"
+                              min="{{ field.min_value }}"
+                              max="{{ field.max_value }}"
+                              step="{{ field.step }}"
+                              value="{{ field.value }}"
+                              oninput="this.nextElementSibling.textContent = this.value"
+                            />
+                            <output>{{ field.value }}</output>
+                          </div>
+                        {% elif field.input_type == 'number' %}
+                          <input
+                            type="number"
+                            name="{{ field.field_name }}"
+                            step="{{ field.step if field.step else 1 }}"
+                            value="{{ field.value }}"
+                          />
+                        {% else %}
+                          <input type="text" name="{{ field.field_name }}" value="{{ field.value }}" />
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endfor %}
+            </details>
+          {% endfor %}
+
+          <div class="actions">
+            <button class="primary" type="submit">Save Config + Restart Server</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      const statsOutput = document.getElementById("statsOutput");
+      const refreshBtn = document.getElementById("refreshStats");
+      const modOutput = document.getElementById("modOutput");
+      const backupOutput = document.getElementById("backupOutput");
+      const backupListOutput = document.getElementById("backupListOutput");
+      const backupSelect = document.getElementById("backupSelect");
+      const refreshBackupsBtn = document.getElementById("refreshBackups");
+
+      async function refreshStats() {
+        refreshBtn.disabled = true;
+        try {
+          const res = await fetch("/api/server/statistics");
+          const data = await res.json();
+          statsOutput.textContent = JSON.stringify(data, null, 2);
+        } catch (err) {
+          statsOutput.textContent = JSON.stringify(
+            { ok: false, error: String(err) },
+            null,
+            2
+          );
+        } finally {
+          refreshBtn.disabled = false;
+        }
+      }
+
+      refreshBtn.addEventListener("click", refreshStats);
+
+      async function refreshBackups() {
+        refreshBackupsBtn.disabled = true;
+        try {
+          const response = await fetch("/api/backups");
+          const payload = await response.json();
+          backupListOutput.textContent = JSON.stringify(payload, null, 2);
+
+          const entries = payload.data || [];
+          backupSelect.innerHTML = "";
+          if (entries.length === 0) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = "No backups found";
+            option.disabled = true;
+            option.selected = true;
+            backupSelect.appendChild(option);
+          } else {
+            entries.forEach((backup) => {
+              const option = document.createElement("option");
+              option.value = backup.name;
+              option.textContent = `${backup.name} (${backup.size_bytes} bytes)`;
+              backupSelect.appendChild(option);
+            });
+          }
+        } catch (err) {
+          backupListOutput.textContent = JSON.stringify(
+            { ok: false, error: String(err) },
+            null,
+            2
+          );
+        } finally {
+          refreshBackupsBtn.disabled = false;
+        }
+      }
+
+      refreshBackupsBtn.addEventListener("click", refreshBackups);
+
+      document.querySelectorAll("form[data-endpoint]").forEach((form) => {
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const endpoint = form.getAttribute("data-endpoint");
+          const outputElementId = form.getAttribute("data-output");
+          const outputElement = outputElementId
+            ? document.getElementById(outputElementId)
+            : modOutput;
+          const body = new URLSearchParams(new FormData(form));
+
+          if (endpoint === "/api/backups/restore") {
+            const selected = body.get("backup_name");
+            if (!selected) {
+              outputElement.textContent = JSON.stringify(
+                { ok: false, error: "Please select a backup to restore." },
+                null,
+                2
+              );
+              return;
+            }
+
+            const proceed = window.confirm(
+              `Restore backup ${selected}? This overwrites current save/config data and restarts the server.`
+            );
+            if (!proceed) {
+              return;
+            }
+          }
+
+          try {
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body,
+            });
+
+            const payload = await response.json();
+            outputElement.textContent = JSON.stringify(payload, null, 2);
+
+            if (endpoint === "/api/backups/create" || endpoint === "/api/backups/restore") {
+              await refreshBackups();
+            }
+          } catch (err) {
+            outputElement.textContent = JSON.stringify(
+              { ok: false, error: String(err) },
+              null,
+              2
+            );
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

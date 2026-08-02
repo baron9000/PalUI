@@ -1,0 +1,17 @@
+services:
+  palui:
+    build: .
+    container_name: palui
+    restart: unless-stopped
+    ports:
+      - "8005:8005"
+    environment:
+      PALWORLD_API_BASE_URL: "http://palworld-server:8212"
+      PALWORLD_API_TOKEN: ""
+      PALWORLD_API_TOKEN_HEADER: "Authorization"
+      PALWORLD_API_TOKEN_PREFIX: "Bearer"
+      PALWORLD_CONFIG_DIR: "/palworld/Pal/Saved/Config/LinuxServer"
+    volumes:
+      - /volume1/Games/palworld:/palworld:rw
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
