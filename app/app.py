@@ -1,4 +1,5 @@
 import configparser
+import json
 import os
 import tarfile
 from collections import OrderedDict
@@ -20,6 +21,11 @@ ENGINE_SETTINGS_PATH = os.path.join(CONFIG_DIR, "Engine.ini")
 PALWORLD_ROOT_DIR = os.environ.get("PALWORLD_ROOT_DIR", "/palworld")
 PALWORLD_SAVE_ROOT = os.environ.get("PALWORLD_SAVE_ROOT", "/palworld/Pal/Saved")
 BACKUP_DIR = os.environ.get("PALWORLD_BACKUP_DIR", "/palworld/backups")
+CONFIG_SNAPSHOT_DIR = os.environ.get("PALWORLD_CONFIG_SNAPSHOT_DIR", "/palworld/backups/config-snapshots")
+CONFIG_SNAPSHOT_POINTER = os.environ.get(
+    "PALWORLD_CONFIG_SNAPSHOT_POINTER",
+    os.path.join(CONFIG_SNAPSHOT_DIR, "latest.json"),
+)
 
 PALWORLD_API_BASE_URL = os.environ.get("PALWORLD_API_BASE_URL", "http://host.docker.internal:8212")
 PALWORLD_API_TOKEN = os.environ.get("PALWORLD_API_TOKEN", "")
@@ -90,6 +96,92 @@ def save_ini(path: str, parser: configparser.ConfigParser) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         parser.write(handle)
+
+
+def copy_file_if_exists(src: str, dst: str) -> bool:
+    if not os.path.exists(src):
+        return False
+
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(src, "rb") as source_handle, open(dst, "wb") as dest_handle:
+        dest_handle.write(source_handle.read())
+    return True
+
+
+def snapshot_config_files(file_paths: list[str]) -> dict[str, Any]:
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    snapshot_dir = os.path.join(CONFIG_SNAPSHOT_DIR, timestamp)
+    os.makedirs(snapshot_dir, exist_ok=True)
+
+    copied_files: list[str] = []
+    for file_path in file_paths:
+        if not os.path.exists(file_path):
+            continue
+        relative_name = os.path.basename(file_path)
+        if copy_file_if_exists(file_path, os.path.join(snapshot_dir, relative_name)):
+            copied_files.append(relative_name)
+
+    manifest = {
+        "timestamp": timestamp,
+        "snapshot_dir": snapshot_dir,
+        "files": copied_files,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    with open(os.path.join(snapshot_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2)
+
+    with open(CONFIG_SNAPSHOT_POINTER, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2)
+
+    return manifest
+
+
+def load_latest_config_snapshot() -> dict[str, Any] | None:
+    if not os.path.exists(CONFIG_SNAPSHOT_POINTER):
+        return None
+
+    try:
+        with open(CONFIG_SNAPSHOT_POINTER, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    snapshot_dir = data.get("snapshot_dir")
+    if not snapshot_dir or not os.path.isdir(snapshot_dir):
+        return None
+
+    return data
+
+
+def restore_config_snapshot(snapshot: dict[str, Any]) -> tuple[bool, str]:
+    snapshot_dir = snapshot.get("snapshot_dir")
+    if not snapshot_dir or not os.path.isdir(snapshot_dir):
+        return False, "Config snapshot is missing or unavailable."
+
+    restored: list[str] = []
+    for file_name in snapshot.get("files", []):
+        src_path = os.path.join(snapshot_dir, file_name)
+        if file_name == "PalWorldSettings.ini":
+            dst_path = PALWORLD_SETTINGS_PATH
+        elif file_name == "Engine.ini":
+            dst_path = ENGINE_SETTINGS_PATH
+        else:
+            continue
+
+        if copy_file_if_exists(src_path, dst_path):
+            restored.append(file_name)
+
+    if not restored:
+        return False, "No config files were restored from the snapshot."
+
+    announce_message = "Config revert made, server restarting."
+    run_announcement(announce_message)
+    restart_ok, restart_res = run_restart(announce_message)
+
+    if restart_ok:
+        return True, f"Restored config files: {', '.join(restored)}"
+
+    return False, f"Config restored, but restart failed: {restart_res}"
 
 
 def split_top_level_csv(raw: str) -> list[str]:
@@ -480,6 +572,8 @@ def save_config_from_form(form_data: dict[str, str], checkbox_keys: set[str]) ->
             break
 
     any_change = False
+    pal_changed = False
+    engine_changed = False
 
     for field_name, field_value in form_data.items():
         parsed = parse_field_name(field_name)
@@ -497,6 +591,7 @@ def save_config_from_form(form_data: dict[str, str], checkbox_keys: set[str]) ->
             if current != normalized_value:
                 option_values[key] = normalized_value
                 any_change = True
+                pal_changed = True
             continue
 
         parser = pal_parser if file_name == "PalWorldSettings.ini" else engine_parser
@@ -507,6 +602,10 @@ def save_config_from_form(form_data: dict[str, str], checkbox_keys: set[str]) ->
         if current != normalized_value:
             parser.set(section_name, key, normalized_value)
             any_change = True
+            if file_name == "PalWorldSettings.ini":
+                pal_changed = True
+            else:
+                engine_changed = True
 
     # Checkboxes not present in request form are false.
     for field_name in checkbox_keys:
@@ -525,6 +624,7 @@ def save_config_from_form(form_data: dict[str, str], checkbox_keys: set[str]) ->
             if current != normalized_value:
                 option_values[key] = normalized_value
                 any_change = True
+                pal_changed = True
             continue
 
         parser = pal_parser if file_name == "PalWorldSettings.ini" else engine_parser
@@ -535,9 +635,24 @@ def save_config_from_form(form_data: dict[str, str], checkbox_keys: set[str]) ->
         if current != normalized_value:
             parser.set(section_name, key, normalized_value)
             any_change = True
+            if file_name == "PalWorldSettings.ini":
+                pal_changed = True
+            else:
+                engine_changed = True
 
     if not any_change:
         return True, "No configuration changes detected."
+
+    snapshot_manifest = snapshot_config_files(
+        [
+            path
+            for path, changed in [
+                (PALWORLD_SETTINGS_PATH, pal_changed),
+                (ENGINE_SETTINGS_PATH, engine_changed),
+            ]
+            if changed
+        ]
+    )
 
     if option_section_name:
         pal_parser.set(
@@ -553,7 +668,10 @@ def save_config_from_form(form_data: dict[str, str], checkbox_keys: set[str]) ->
     restart_ok, restart_res = run_restart("Config change made, server restarting.")
 
     if announce_ok and restart_ok:
-        return True, "Configuration updated and restart initiated with announcement."
+        return True, (
+            "Configuration updated and restart initiated with announcement. "
+            f"Snapshot saved: {snapshot_manifest.get('timestamp')}"
+        )
 
     return (
         False,
@@ -576,6 +694,7 @@ def index():
 
     stats_ok, stats_data = fetch_statistics()
     backups = list_backups()
+    latest_config_snapshot = load_latest_config_snapshot()
 
     return render_template(
         "index.html",
@@ -583,9 +702,11 @@ def index():
         stats_ok=stats_ok,
         stats_data=stats_data,
         backups=backups,
+        latest_config_snapshot=latest_config_snapshot,
         api_base=PALWORLD_API_BASE_URL,
         config_dir=CONFIG_DIR,
         backup_dir=BACKUP_DIR,
+        config_snapshot_dir=CONFIG_SNAPSHOT_DIR,
     )
 
 
@@ -595,6 +716,16 @@ def config_save():
     checkbox_keys = set(request.form.getlist("__bool_fields"))
 
     ok, message = save_config_from_form(form_data, checkbox_keys)
+    return redirect(url_for("index", status="ok" if ok else "error", message=message))
+
+
+@app.post("/config/revert-latest")
+def config_revert_latest():
+    snapshot = load_latest_config_snapshot()
+    if not snapshot:
+        return redirect(url_for("index", status="error", message="No config snapshot is available to revert."))
+
+    ok, message = restore_config_snapshot(snapshot)
     return redirect(url_for("index", status="ok" if ok else "error", message=message))
 
 

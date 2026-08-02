@@ -120,6 +120,23 @@
           Editing either config file saves changes to disk and triggers a Palworld announcement + restart.
         </p>
 
+        <div class="snapshot-card">
+          <div>
+            <strong>Latest config snapshot:</strong>
+            {% if latest_config_snapshot %}
+              <span>{{ latest_config_snapshot.timestamp }}</span>
+              <div class="muted">Files: {{ latest_config_snapshot.files | join(', ') }}</div>
+            {% else %}
+              <span>None available yet</span>
+            {% endif %}
+          </div>
+          <form method="post" action="/config/revert-latest">
+            <button class="warn" type="submit" {% if not latest_config_snapshot %}disabled{% endif %}>
+              Revert Latest Config Change
+            </button>
+          </form>
+        </div>
+
         <form method="post" action="/config/save" class="config-form">
           {% for file_name, sections in configs.items() %}
             <details class="file-block" open>
