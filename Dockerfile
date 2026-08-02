@@ -11,8 +11,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+RUN chown -R palui:palui /app
 
 USER palui
 EXPOSE 8005
 
-CMD ["python", "app/app.py"]
+CMD ["python", "/app/app/app.py"]
