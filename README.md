@@ -6,6 +6,9 @@ Lightweight web UI for managing a Palworld 1.0 server over REST plus config file
 
 - Runs on port `8005`.
 - Shows server statistics from Palworld REST API.
+- Exposes the documented community-server REST commands:
+  - `info`, `players`, `settings`, `metrics`, `game-data`
+  - `announce`, `kick`, `ban`, `unban`, `save`, `shutdown`, `stop`
 - Shows and edits:
   - `PalWorldSettings.ini`
   - `Engine.ini`
@@ -53,9 +56,13 @@ with your host path containing full Palworld data.
 2. Optionally set API auth variables:
 
 - `PALWORLD_API_BASE_URL`
+- `PALWORLD_STATS_COMMAND` to choose the default query command shown on load
+- `PALWORLD_API_USERNAME` and `PALWORLD_API_PASSWORD` for the REST API basic auth used by the community-server app
 - `PALWORLD_API_TOKEN`
 - `PALWORLD_API_TOKEN_HEADER` (default `Authorization`)
 - `PALWORLD_API_TOKEN_PREFIX` (default `Bearer`)
+
+If you are using thijsvanloef/palworld-server-docker, the REST wrapper uses the admin password for REST calls. Set `PALWORLD_API_USERNAME=admin` and `PALWORLD_API_PASSWORD=<your ADMIN_PASSWORD>`.
 
 3. Start:
 

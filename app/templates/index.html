@@ -28,51 +28,61 @@
       <section class="grid two-up">
         <article class="panel">
           <div class="panel-head">
-            <h2>Server Statistics</h2>
-            <button id="refreshStats" type="button">Refresh</button>
+            <h2>REST API Commands</h2>
+            <button id="refreshStats" type="button">Refresh Info</button>
           </div>
           <p class="status {{ 'ok' if stats_ok else 'error' }}">
-            {{ 'Connected to API.' if stats_ok else 'Could not retrieve statistics from API.' }}
+            {{ 'REST API reachable.' if stats_ok else 'Could not reach the REST API.' }}
           </p>
+          <div class="command-toolbar">
+            <button type="button" data-rest-command="info">Info</button>
+            <button type="button" data-rest-command="players">Players</button>
+            <button type="button" data-rest-command="settings">Settings</button>
+            <button type="button" data-rest-command="metrics">Metrics</button>
+            <button type="button" data-rest-command="game-data">Game Data</button>
+            <button type="button" data-rest-command="save">Save</button>
+            <button class="danger" type="button" data-rest-command="stop">Stop</button>
+          </div>
           <pre id="statsOutput">{{ stats_data | tojson(indent=2) }}</pre>
         </article>
 
         <article class="panel">
-          <h2>Moderation Tasks</h2>
+          <h2>Player & Shutdown Actions</h2>
 
-          <form class="inline-form" data-endpoint="/api/mod/announcement">
-            <label>Announcement</label>
+          <form class="inline-form" data-rest-command="announce">
+            <label>Announce</label>
             <input name="message" type="text" placeholder="Message to all players" required />
             <button type="submit">Send</button>
           </form>
 
-          <form class="inline-form" data-endpoint="/api/mod/kick">
+          <form class="inline-form" data-rest-command="kick">
             <label>Kick Player</label>
-            <input name="player_id" type="text" placeholder="Player ID / SteamID" required />
-            <input name="reason" type="text" placeholder="Reason" />
+            <input name="player_id" type="text" placeholder="SteamID" required />
+            <input name="reason" type="text" placeholder="Message" />
             <button type="submit">Kick</button>
           </form>
 
-          <form class="inline-form" data-endpoint="/api/mod/ban">
+          <form class="inline-form" data-rest-command="ban">
             <label>Ban Player</label>
-            <input name="player_id" type="text" placeholder="Player ID / SteamID" required />
-            <input name="reason" type="text" placeholder="Reason" />
+            <input name="player_id" type="text" placeholder="SteamID" required />
+            <input name="reason" type="text" placeholder="Message" />
             <button type="submit">Ban</button>
           </form>
 
-          <form class="inline-form" data-endpoint="/api/mod/restart">
-            <label>Restart Server</label>
-            <input name="message" type="text" value="Server restarting." />
-            <button class="warn" type="submit">Restart</button>
+          <form class="inline-form" data-rest-command="unban">
+            <label>Unban Player</label>
+            <input name="player_id" type="text" placeholder="SteamID" required />
+            <button type="submit">Unban</button>
           </form>
 
-          <form class="inline-form" data-endpoint="/api/mod/shutdown">
+          <form class="inline-form" data-rest-command="shutdown">
             <label>Shutdown Server</label>
+            <input name="waittime" type="number" min="0" step="1" value="1" />
             <input name="message" type="text" value="Server shutting down." />
             <button class="danger" type="submit">Shutdown</button>
           </form>
 
-          <pre id="modOutput">No moderation actions run yet.</pre>
+          <pre id="modOutput">No REST actions run yet.</pre>
         </article>
       </section>
 
@@ -241,6 +251,75 @@
       }
 
       refreshBtn.addEventListener("click", refreshStats);
+
+      async function runRestCommand(command, body, outputElement) {
+        const response = await fetch(`/api/rest/${command}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body,
+        });
+
+        const payload = await response.json();
+        outputElement.textContent = JSON.stringify(payload, null, 2);
+        return payload;
+      }
+
+      document.querySelectorAll("[data-rest-command]").forEach((element) => {
+        if (element.tagName === "FORM") {
+          element.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const command = element.getAttribute("data-rest-command");
+            const body = new URLSearchParams(new FormData(element));
+            const outputElement = modOutput;
+
+            if (command === "shutdown") {
+              const waittime = body.get("waittime") || "1";
+              const message = body.get("message") || "Server shutting down.";
+              const proceed = window.confirm(
+                `Shutdown in ${waittime} second(s)?\n\n${message}`
+              );
+              if (!proceed) {
+                return;
+              }
+            }
+
+            try {
+              await runRestCommand(command, body, outputElement);
+            } catch (err) {
+              outputElement.textContent = JSON.stringify(
+                { ok: false, error: String(err) },
+                null,
+                2
+              );
+            }
+          });
+        } else {
+          element.addEventListener("click", async () => {
+            const command = element.getAttribute("data-rest-command");
+
+            if (command === "stop") {
+              const proceed = window.confirm(
+                "Force stop the server? This may skip a graceful save."
+              );
+              if (!proceed) {
+                return;
+              }
+            }
+
+            try {
+              await runRestCommand(command, new URLSearchParams(), modOutput);
+            } catch (err) {
+              modOutput.textContent = JSON.stringify(
+                { ok: false, error: String(err) },
+                null,
+                2
+              );
+            }
+          });
+        }
+      });
 
       async function refreshBackups() {
         refreshBackupsBtn.disabled = true;

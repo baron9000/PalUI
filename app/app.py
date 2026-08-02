@@ -28,10 +28,14 @@ CONFIG_SNAPSHOT_POINTER = os.environ.get(
 )
 
 PALWORLD_API_BASE_URL = os.environ.get("PALWORLD_API_BASE_URL", "http://host.docker.internal:8212")
+PALWORLD_API_USERNAME = os.environ.get("PALWORLD_API_USERNAME", "admin")
+PALWORLD_API_PASSWORD = os.environ.get("PALWORLD_API_PASSWORD", "")
 PALWORLD_API_TOKEN = os.environ.get("PALWORLD_API_TOKEN", "")
 PALWORLD_API_TOKEN_HEADER = os.environ.get("PALWORLD_API_TOKEN_HEADER", "Authorization")
 PALWORLD_API_TOKEN_PREFIX = os.environ.get("PALWORLD_API_TOKEN_PREFIX", "Bearer")
 PALWORLD_API_TIMEOUT = float(os.environ.get("PALWORLD_API_TIMEOUT", "8"))
+PALWORLD_STATS_ENDPOINT = os.environ.get("PALWORLD_STATS_ENDPOINT", "").strip()
+PALWORLD_STATS_COMMAND = os.environ.get("PALWORLD_STATS_COMMAND", "info").strip()
 
 FIELD_SEP = "||"
 OPTION_SECTION_KEY = "__OPTION_SETTINGS__"
@@ -337,24 +341,33 @@ def parser_to_ui_model(file_name: str, parser: configparser.ConfigParser) -> lis
     return sections
 
 
-def get_auth_headers() -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
-    if PALWORLD_API_TOKEN:
+REST_GET_COMMANDS = {"info", "players", "settings", "metrics", "game-data"}
+REST_POST_COMMANDS = {"announce", "ban", "kick", "save", "shutdown", "stop", "unban"}
+
+
+def get_request_kwargs() -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"headers": {"Content-Type": "application/json"}}
+
+    if PALWORLD_API_PASSWORD:
+        kwargs["auth"] = (PALWORLD_API_USERNAME or "admin", PALWORLD_API_PASSWORD)
+    elif PALWORLD_API_TOKEN:
         token = PALWORLD_API_TOKEN
         if PALWORLD_API_TOKEN_PREFIX:
             token = f"{PALWORLD_API_TOKEN_PREFIX} {PALWORLD_API_TOKEN}".strip()
-        headers[PALWORLD_API_TOKEN_HEADER] = token
-    return headers
+        kwargs["headers"][PALWORLD_API_TOKEN_HEADER] = token
+
+    return kwargs
 
 
 def request_json(method: str, endpoint: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     url = f"{PALWORLD_API_BASE_URL.rstrip('/')}/{endpoint.lstrip('/')}"
+    request_kwargs = get_request_kwargs()
     response = requests.request(
         method=method,
         url=url,
-        headers=get_auth_headers(),
         json=payload,
         timeout=PALWORLD_API_TIMEOUT,
+        **request_kwargs,
     )
     response.raise_for_status()
     if not response.content:
@@ -365,80 +378,79 @@ def request_json(method: str, endpoint: str, payload: dict[str, Any] | None = No
         return {"ok": True, "status": response.status_code, "text": response.text}
 
 
-def call_first_success(
-    method: str,
-    endpoints: list[str],
-    payloads: list[dict[str, Any] | None],
-) -> tuple[bool, dict[str, Any]]:
-    errors: list[str] = []
-    for endpoint in endpoints:
-        for payload in payloads:
-            try:
-                return True, request_json(method, endpoint, payload)
-            except requests.RequestException as err:
-                errors.append(f"{endpoint} ({payload}): {err}")
-    return False, {"errors": errors}
-
-
 def fetch_statistics() -> tuple[bool, dict[str, Any]]:
-    return call_first_success(
-        "GET",
-        [
-            "/v1/api/server/statistics",
-            "/v1/api/statistics",
-            "/v1/api/metrics",
-            "/v1/api/info",
-        ],
-        [None],
-    )
+    if PALWORLD_STATS_ENDPOINT:
+        try:
+            return True, request_json("GET", PALWORLD_STATS_ENDPOINT)
+        except requests.RequestException as err:
+            return False, {"errors": [f"{PALWORLD_STATS_ENDPOINT} (None): {err}"]}
+
+    if PALWORLD_STATS_COMMAND:
+        return run_rest_command(PALWORLD_STATS_COMMAND)
+
+    return run_rest_command("info")
+
+
+def run_rest_command(command: str, payload: dict[str, Any] | None = None) -> tuple[bool, dict[str, Any]]:
+    if command not in REST_GET_COMMANDS and command not in REST_POST_COMMANDS:
+        return False, {"errors": [f"Unsupported REST command: {command}"]}
+
+    method = "GET" if command in REST_GET_COMMANDS else "POST"
+    try:
+        return True, request_json(method, f"/v1/api/{command}", payload)
+    except requests.RequestException as err:
+        return False, {"errors": [f"/v1/api/{command} ({payload}): {err}"]}
+
+def run_info() -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("info")
+
+
+def run_players() -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("players")
+
+
+def run_settings() -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("settings")
+
+
+def run_metrics() -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("metrics")
+
+
+def run_game_data() -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("game-data")
 
 
 def run_announcement(message: str) -> tuple[bool, dict[str, Any]]:
-    return call_first_success(
-        "POST",
-        ["/v1/api/announce", "/v1/api/server/announce"],
-        [{"message": message}, {"text": message}],
-    )
-
-
-def run_restart(message: str) -> tuple[bool, dict[str, Any]]:
-    return call_first_success(
-        "POST",
-        ["/v1/api/restart", "/v1/api/server/restart"],
-        [{"message": message}, {"text": message}, None],
-    )
-
-
-def run_shutdown(message: str) -> tuple[bool, dict[str, Any]]:
-    return call_first_success(
-        "POST",
-        ["/v1/api/shutdown", "/v1/api/server/shutdown"],
-        [{"message": message}, {"text": message}, None],
-    )
+    return run_rest_command("announce", {"message": message})
 
 
 def run_kick(player_id: str, reason: str) -> tuple[bool, dict[str, Any]]:
-    return call_first_success(
-        "POST",
-        ["/v1/api/kick", "/v1/api/player/kick"],
-        [
-            {"playerId": player_id, "reason": reason},
-            {"steamId": player_id, "reason": reason},
-            {"player": player_id, "reason": reason},
-        ],
-    )
+    return run_rest_command("kick", {"userid": player_id, "message": reason or "You are kicked."})
 
 
 def run_ban(player_id: str, reason: str) -> tuple[bool, dict[str, Any]]:
-    return call_first_success(
-        "POST",
-        ["/v1/api/ban", "/v1/api/player/ban"],
-        [
-            {"playerId": player_id, "reason": reason},
-            {"steamId": player_id, "reason": reason},
-            {"player": player_id, "reason": reason},
-        ],
-    )
+    return run_rest_command("ban", {"userid": player_id, "message": reason or "You are banned."})
+
+
+def run_unban(player_id: str) -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("unban", {"userid": player_id})
+
+
+def run_save() -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("save")
+
+
+def run_stop() -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("stop")
+
+
+def run_shutdown(waittime: int, message: str) -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("shutdown", {"waittime": waittime, "message": message})
+
+
+def run_restart(message: str) -> tuple[bool, dict[str, Any]]:
+    return run_shutdown(1, message)
 
 
 def ensure_backup_dir() -> None:
@@ -479,6 +491,10 @@ def create_backup() -> tuple[bool, str, dict[str, Any]]:
 
     if not os.path.isdir(PALWORLD_ROOT_DIR):
         return False, f"Palworld root path not found: {PALWORLD_ROOT_DIR}", {}
+
+    save_ok, save_data = run_save()
+    if not save_ok:
+        return False, f"Unable to save world before backup: {save_data}", {}
 
     backup_name = build_backup_name()
     backup_path = os.path.join(BACKUP_DIR, backup_name)
@@ -729,9 +745,65 @@ def config_revert_latest():
     return redirect(url_for("index", status="ok" if ok else "error", message=message))
 
 
+@app.post("/api/rest/<command>")
+def api_rest_command(command: str):
+    command = command.lower().strip()
+
+    if command in {"info", "players", "settings", "metrics", "game-data", "save", "stop"}:
+        ok, data = run_rest_command(command)
+        code = 200 if ok else 502
+        return jsonify({"ok": ok, "data": data}), code
+
+    if command == "announce":
+        message = request.form.get("message", "").strip()
+        if not message:
+            return jsonify({"ok": False, "error": "Message is required."}), 400
+
+        ok, data = run_announcement(message)
+        code = 200 if ok else 502
+        return jsonify({"ok": ok, "data": data}), code
+
+    if command in {"kick", "ban"}:
+        player_id = request.form.get("player_id", "").strip()
+        if not player_id:
+            return jsonify({"ok": False, "error": "Player ID is required."}), 400
+
+        reason = request.form.get("reason", "").strip()
+        if command == "kick":
+            ok, data = run_kick(player_id, reason)
+        else:
+            ok, data = run_ban(player_id, reason)
+
+        code = 200 if ok else 502
+        return jsonify({"ok": ok, "data": data}), code
+
+    if command == "unban":
+        player_id = request.form.get("player_id", "").strip()
+        if not player_id:
+            return jsonify({"ok": False, "error": "Player ID is required."}), 400
+
+        ok, data = run_unban(player_id)
+        code = 200 if ok else 502
+        return jsonify({"ok": ok, "data": data}), code
+
+    if command == "shutdown":
+        waittime_raw = request.form.get("waittime", "1").strip() or "1"
+        try:
+            waittime = max(0, int(waittime_raw))
+        except ValueError:
+            return jsonify({"ok": False, "error": "Wait time must be an integer."}), 400
+
+        message = request.form.get("message", "Server shutting down.").strip()
+        ok, data = run_shutdown(waittime, message)
+        code = 200 if ok else 502
+        return jsonify({"ok": ok, "data": data}), code
+
+    return jsonify({"ok": False, "error": f"Unsupported REST command: {command}"}), 404
+
+
 @app.get("/api/server/statistics")
 def api_statistics():
-    ok, data = fetch_statistics()
+    ok, data = run_info()
     return jsonify({"ok": ok, "data": data})
 
 
@@ -783,7 +855,7 @@ def api_restart():
 def api_shutdown():
     message = request.form.get("message", "Server shutting down.").strip()
     run_announcement(message)
-    ok, data = run_shutdown(message)
+    ok, data = run_shutdown(1, message)
     code = 200 if ok else 502
     return jsonify({"ok": ok, "data": data}), code
 

@@ -274,6 +274,17 @@ button.primary {
   justify-content: flex-start;
 }
 
+.command-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.8rem 0 0.9rem;
+}
+
+.command-toolbar button {
+  min-width: 94px;
+}
+
 .snapshot-card {
   display: flex;
   justify-content: space-between;
