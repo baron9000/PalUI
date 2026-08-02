@@ -6,6 +6,8 @@ services:
     ports:
       - "8005:8005"
     environment:
+      PGID: 10
+      PUID: 1000
       PALWORLD_API_BASE_URL: "http://palworld-server:8212"
       PALWORLD_API_TOKEN: ""
       PALWORLD_API_TOKEN_HEADER: "Authorization"
