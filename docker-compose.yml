@@ -19,10 +19,5 @@ services:
 
 networks:
   physical_eth:
-    driver: macvlan
-    driver_opts:
-      parent: eth1
-    ipam:
-      config:
-        - subnet: "192.168.10.0/24"
-          gateway: "192.168.10.1"
+    external: true
+    name: palworld-server_physical_eth
