@@ -74,7 +74,7 @@ class FieldMeta:
 
 
 def config_parser() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser(interpolation=None)
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
     parser.optionxform = str
     return parser
 
