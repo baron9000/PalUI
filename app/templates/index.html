@@ -272,7 +272,8 @@
             event.preventDefault();
             const command = element.getAttribute("data-rest-command");
             const body = new URLSearchParams(new FormData(element));
-            const outputElement = modOutput;
+            const outputElementId = element.getAttribute("data-output") || "modOutput";
+            const outputElement = document.getElementById(outputElementId);
 
             if (command === "shutdown") {
               const waittime = body.get("waittime") || "1";
@@ -298,6 +299,8 @@
         } else {
           element.addEventListener("click", async () => {
             const command = element.getAttribute("data-rest-command");
+            const outputElementId = element.getAttribute("data-output") || "statsOutput";
+            const outputElement = document.getElementById(outputElementId);
 
             if (command === "stop") {
               const proceed = window.confirm(
@@ -309,9 +312,9 @@
             }
 
             try {
-              await runRestCommand(command, new URLSearchParams(), modOutput);
+              await runRestCommand(command, new URLSearchParams(), outputElement);
             } catch (err) {
-              modOutput.textContent = JSON.stringify(
+              outputElement.textContent = JSON.stringify(
                 { ok: false, error: String(err) },
                 null,
                 2
