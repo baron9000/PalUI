@@ -345,7 +345,7 @@ def parser_to_ui_model(file_name: str, parser: configparser.ConfigParser) -> lis
 
 
 REST_GET_COMMANDS = {"info", "players", "settings", "metrics", "game-data"}
-REST_POST_COMMANDS = {"announce", "ban", "kick", "save", "shutdown", "stop", "unban"}
+REST_POST_COMMANDS = {"announce", "ban", "kick", "save", "shutdown", "start", "stop", "unban"}
 
 
 def get_request_kwargs() -> dict[str, Any]:
@@ -446,6 +446,10 @@ def run_save() -> tuple[bool, dict[str, Any]]:
 
 def run_stop() -> tuple[bool, dict[str, Any]]:
     return run_rest_command("stop")
+
+
+def run_start() -> tuple[bool, dict[str, Any]]:
+    return run_rest_command("start")
 
 
 def run_shutdown(waittime: int, message: str) -> tuple[bool, dict[str, Any]]:
@@ -714,6 +718,14 @@ def save_config_from_form(form_data: dict[str, str], checkbox_keys: set[str]) ->
     if not any_change:
         return True, "No configuration changes detected."
 
+    announce_ok, announce_res = run_announcement("Config change made, server restarting.")
+    stop_ok, stop_res = run_stop()
+    if not stop_ok:
+        return False, (
+            "Stop failed; config was not changed. "
+            f"announce={announce_res} stop={stop_res}"
+        )
+
     snapshot_manifest = snapshot_config_files(
         [
             path
@@ -735,20 +747,26 @@ def save_config_from_form(form_data: dict[str, str], checkbox_keys: set[str]) ->
     save_ini(PALWORLD_SETTINGS_PATH, pal_parser)
     save_ini(ENGINE_SETTINGS_PATH, engine_parser)
 
-    announce_ok, announce_res = run_announcement("Config change made, server restarting.")
-    restart_ok, restart_res = run_restart("Config change made, server restarting.")
+    start_ok, start_res = run_start()
 
-    if announce_ok and restart_ok:
+    if announce_ok and start_ok:
         return True, (
-            "Configuration updated and restart initiated with announcement. "
+            "Configuration updated and start initiated after stop. "
             f"Snapshot saved: {snapshot_manifest.get('timestamp')}"
+        )
+
+    if announce_ok and not start_ok:
+        return True, (
+            "Configuration updated after stop. Start API failed; if your server wrapper "
+            "auto-starts after stop this is expected. "
+            f"start={start_res} Snapshot saved: {snapshot_manifest.get('timestamp')}"
         )
 
     return (
         False,
         (
-            "Configuration saved, but Palworld API restart flow failed. "
-            f"announce={announce_res} restart={restart_res}"
+            "Configuration updated after stop, but API start/announcement had issues. "
+            f"announce={announce_res} start={start_res}"
         ),
     )
 

@@ -27,9 +27,11 @@ Lightweight web UI for managing a Palworld 1.0 server over REST plus config file
   - list available backups
   - create timestamped backup archives
   - restore selected backup from list
-- Any config save triggers:
+- Any config save now triggers this order:
   - announcement: `Config change made, server restarting.`
-  - restart request via Palworld REST API
+  - stop server
+  - write config files
+  - start server (or rely on wrapper auto-start if no start endpoint is exposed)
 
 ## Required Mount
 
