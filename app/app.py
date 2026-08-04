@@ -36,6 +36,9 @@ PALWORLD_API_TOKEN_PREFIX = os.environ.get("PALWORLD_API_TOKEN_PREFIX", "Bearer"
 PALWORLD_API_TIMEOUT = float(os.environ.get("PALWORLD_API_TIMEOUT", "8"))
 PALWORLD_STATS_ENDPOINT = os.environ.get("PALWORLD_STATS_ENDPOINT", "").strip()
 PALWORLD_STATS_COMMAND = os.environ.get("PALWORLD_STATS_COMMAND", "info").strip()
+PALWORLD_RESTART_STRATEGY = os.environ.get(
+    "PALWORLD_RESTART_STRATEGY", "save-stop-then-shutdown"
+).strip().lower()
 
 FIELD_SEP = "||"
 OPTION_SECTION_KEY = "__OPTION_SETTINGS__"
@@ -450,7 +453,59 @@ def run_shutdown(waittime: int, message: str) -> tuple[bool, dict[str, Any]]:
 
 
 def run_restart(message: str) -> tuple[bool, dict[str, Any]]:
-    return run_shutdown(1, message)
+    # Some server wrappers rewrite config during graceful shutdown. A save+stop
+    # sequence often preserves just-written config files better than shutdown.
+    strategy = PALWORLD_RESTART_STRATEGY
+
+    if strategy == "shutdown":
+        return run_shutdown(1, message)
+
+    save_ok, save_res = run_save()
+    stop_ok, stop_res = run_stop()
+
+    if strategy == "save-stop":
+        if save_ok and stop_ok:
+            return True, {
+                "strategy": strategy,
+                "save": save_res,
+                "stop": stop_res,
+            }
+        return False, {
+            "strategy": strategy,
+            "errors": [
+                "save failed" if not save_ok else None,
+                "stop failed" if not stop_ok else None,
+            ],
+            "save": save_res,
+            "stop": stop_res,
+        }
+
+    # Default strategy: try save+stop first, then fall back to shutdown.
+    if save_ok and stop_ok:
+        return True, {
+            "strategy": "save-stop-then-shutdown",
+            "path": "save-stop",
+            "save": save_res,
+            "stop": stop_res,
+        }
+
+    shutdown_ok, shutdown_res = run_shutdown(1, message)
+    if shutdown_ok:
+        return True, {
+            "strategy": "save-stop-then-shutdown",
+            "path": "shutdown-fallback",
+            "save": save_res,
+            "stop": stop_res,
+            "shutdown": shutdown_res,
+        }
+
+    return False, {
+        "strategy": "save-stop-then-shutdown",
+        "errors": ["save+stop failed", "shutdown fallback failed"],
+        "save": save_res,
+        "stop": stop_res,
+        "shutdown": shutdown_res,
+    }
 
 
 def ensure_backup_dir() -> None:

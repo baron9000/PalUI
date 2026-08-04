@@ -61,8 +61,14 @@ with your host path containing full Palworld data.
 - `PALWORLD_API_TOKEN`
 - `PALWORLD_API_TOKEN_HEADER` (default `Authorization`)
 - `PALWORLD_API_TOKEN_PREFIX` (default `Bearer`)
+- `PALWORLD_RESTART_STRATEGY` (default `save-stop-then-shutdown`)
+  - `save-stop-then-shutdown`: try `save` + `stop` first, fallback to `shutdown`
+  - `save-stop`: only `save` + `stop`
+  - `shutdown`: only graceful shutdown (legacy behavior)
 
 If you are using thijsvanloef/palworld-server-docker, the REST wrapper uses the admin password for REST calls. Set `PALWORLD_API_USERNAME=admin` and `PALWORLD_API_PASSWORD=<your ADMIN_PASSWORD>`.
+
+If your config values keep reverting after restart, your Palworld server container may be regenerating config on boot from its own environment. In that case, disable boot-time config generation in the server container (for example `UPDATE_ON_BOOT=false` in thijsvanloef/palworld-server-docker) or update that container's config source to match your edits.
 
 3. Start:
 

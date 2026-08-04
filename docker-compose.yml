@@ -13,6 +13,7 @@ services:
       PALWORLD_API_TOKEN: ""
       PALWORLD_API_TOKEN_HEADER: "Authorization"
       PALWORLD_API_TOKEN_PREFIX: "Bearer"
+      PALWORLD_RESTART_STRATEGY: "save-stop-then-shutdown"
       PALWORLD_CONFIG_DIR: "/palworld/Pal/Saved/Config/LinuxServer"
     volumes:
       - /volume1/Games/palworld:/palworld:rw
