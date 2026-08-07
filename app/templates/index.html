@@ -19,11 +19,15 @@
         </div>
       </header>
 
-      {% if request.args.get('message') %}
-        <section class="banner {{ 'ok' if request.args.get('status') == 'ok' else 'error' }}">
-          {{ request.args.get('message') }}
-        </section>
-      {% endif %}
+      {% with flashes = get_flashed_messages(with_categories=true) %}
+        {% if flashes %}
+          {% for category, message in flashes %}
+            <section class="banner {{ 'ok' if category == 'ok' else 'error' }}">
+              {{ message }}
+            </section>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
 
       <section class="grid two-up">
         <article class="panel">

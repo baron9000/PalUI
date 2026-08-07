@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import requests
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("PALUI_SECRET_KEY", "palui-dev-key")
@@ -346,6 +346,7 @@ def parser_to_ui_model(file_name: str, parser: configparser.ConfigParser) -> lis
 
 REST_GET_COMMANDS = {"info", "players", "settings", "metrics", "game-data"}
 REST_POST_COMMANDS = {"announce", "ban", "kick", "save", "shutdown", "start", "stop", "unban"}
+SAFE_STATS_COMMANDS = {"info", "players", "settings", "metrics", "game-data"}
 
 
 def get_request_kwargs() -> dict[str, Any]:
@@ -389,7 +390,10 @@ def fetch_statistics() -> tuple[bool, dict[str, Any]]:
             return False, {"errors": [f"{PALWORLD_STATS_ENDPOINT} (None): {err}"]}
 
     if PALWORLD_STATS_COMMAND:
-        return run_rest_command(PALWORLD_STATS_COMMAND)
+        # Only allow read-only commands during dashboard page load.
+        command = PALWORLD_STATS_COMMAND.lower()
+        if command in SAFE_STATS_COMMANDS:
+            return run_rest_command(command)
 
     return run_rest_command("info")
 
@@ -805,17 +809,20 @@ def config_save():
     checkbox_keys = set(request.form.getlist("__bool_fields"))
 
     ok, message = save_config_from_form(form_data, checkbox_keys)
-    return redirect(url_for("index", status="ok" if ok else "error", message=message))
+    flash(message, "ok" if ok else "error")
+    return redirect(url_for("index"))
 
 
 @app.post("/config/revert-latest")
 def config_revert_latest():
     snapshot = load_latest_config_snapshot()
     if not snapshot:
-        return redirect(url_for("index", status="error", message="No config snapshot is available to revert."))
+        flash("No config snapshot is available to revert.", "error")
+        return redirect(url_for("index"))
 
     ok, message = restore_config_snapshot(snapshot)
-    return redirect(url_for("index", status="ok" if ok else "error", message=message))
+    flash(message, "ok" if ok else "error")
+    return redirect(url_for("index"))
 
 
 @app.post("/api/rest/<command>")
